@@ -5,7 +5,7 @@
 > ## Sobre o Curso
 >
 > **Pós-Graduação:** Pós AIOps e IA na Engenharia de Cloud
-> **Aluno:** JVmnhz
+> **Aluno:** João Victor Munhoz
 > **GitHub:** [jvictormo-art](https://github.com/jvictormo-art)
 >
 > ## Estrutura do Repositório
