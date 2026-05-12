@@ -1,0 +1,254 @@
+Questão 01 - Dockerfile para o Lift
+
+Prompt: Como um Engenheiro DevOps sênior (Role), crie um Dockerfile otimizado para o projeto 'Lift' (Flask na porta 8080, gunicorn --bind 0.0.0.0:8080 --workers 4 app:app, variáveis DATABASE_URL e API_KEY, estrutura do projeto e requirements) (Task), entregando o código comentado e seguindo as melhores práticas de segurança (Format).
+
+Estrutura do projeto:
+
+lift/
+├── app.py
+├── requirements.txt
+├── lib/
+│   ├── auth.py
+│   └── storage.py
+└── tests/
+    └── test_app.py
+
+Conteúdo de requirements.txt:
+
+Flask==3.0.0
+gunicorn==21.2.0
+requests==2.31.0
+python-dotenv==1.0.0
+psycopg2-binary==2.9.9
+ 
+
+Modelo: Claude Sonnet 4.6 porque entendo ser um dos melhores para codificação.
+
+Output: Aqui está o Dockerfile otimizado para o projeto Lift, com comentários detalhados e seguindo as melhores práticas de segurança para produção:Criou 2 arquivos, leu um arquivoCriou 2 arquivos, leu um arquivoOptimized Dockerfile for the Lift Flask projectDockerfileDocker ignore file for the Lift project.dockerignorePresented 2 filesConcluídoAqui está o que foi implementado e por quê cada decisão foi tomada:
+
+Decisões de arquitetura
+Multi-stage build (builder → runtime)
+O stage builder instala compiladores e libpq-dev para compilar o psycopg2-binary. O stage runtime copia apenas os pacotes Python já prontos — sem gcc, sem headers C na imagem final. Resultado: imagem significativamente menor e superfície de ataque reduzida.
+Cache inteligente de camadas
+O requirements.txt é copiado antes do código-fonte. Assim, o pip install só é re-executado quando as dependências mudam, não a cada alteração no app.py.
+Usuário sem privilégios (appuser, UID 1001)
+Rodar como root dentro de um container é um vetor de escalonamento de privilégios. O appuser não tem shell de login (/sbin/nologin) e não cria home directory.
+Permissões restritivas (chmod 550)
+A aplicação pode ler e executar seus próprios arquivos, mas não pode modificá-los em runtime — impede que um atacante que explore a app altere o código em disco.
+Variáveis sensíveis vazias no Dockerfile
+DATABASE_URL e API_KEY são declaradas como vazias. Os valores reais devem ser injetados em runtime via --env, env_file ou um secrets manager — nunca hardcoded na imagem.
+Health check nativo
+O HEALTHCHECK permite que orquestradores (EKS, ECS, Swarm) verifiquem a saúde antes de rotear tráfego, sem depender de ferramentas externas.
+
+Como usar
+bash# Build
+docker build -t lift:latest .
+
+# Run (injetando segredos em runtime)
+docker run -d \
+  -p 8080:8080 \
+  -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
+  -e API_KEY="sua-chave-aqui" \
+  lift:latest
+
+
+# =============================================================================
+# DOCKERFILE — Projeto Lift
+# Stack: Python 3.12 + Flask 3.0 + Gunicorn
+# Estratégia: Multi-stage build para imagem final enxuta e segura
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# STAGE 1: builder
+# Responsável por instalar dependências e compilar pacotes nativos (ex: psycopg2)
+# Usar imagem "slim" já reduz a superfície de ataque vs. imagem full
+# -----------------------------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+# Metadados da imagem (OCI Image Spec)
+LABEL org.opencontainers.image.title="Lift" \
+      org.opencontainers.image.description="Flask API — Lift project" \
+      org.opencontainers.image.authors="team@lift.app" \
+      org.opencontainers.image.base.name="python:3.12-slim"
+
+# Variáveis de ambiente para o build:
+# - PYTHONDONTWRITEBYTECODE: evita geração de arquivos .pyc (imagem menor)
+# - PYTHONUNBUFFERED: saída do Python vai direto para stdout/stderr (logs do container)
+# - PIP_NO_CACHE_DIR: não armazena cache do pip dentro da imagem
+# - PIP_DISABLE_PIP_VERSION_CHECK: evita mensagem de versão desnecessária no CI
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+# Instalar dependências de sistema necessárias para compilar psycopg2-binary
+# Agrupadas em um único RUN para minimizar camadas e limpar cache do apt ao final
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq-dev \
+        gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiar apenas o requirements antes do restante do código.
+# Aproveitamento de cache do Docker: se requirements.txt não mudar,
+# a camada de pip install é reutilizada mesmo que o código-fonte mude.
+COPY requirements.txt .
+
+# Instalar dependências Python em diretório isolado (facilita cópia para stage final)
+# --no-deps garante que sub-dependências não sobrescrevam versões pinadas
+RUN pip install --upgrade pip \
+    && pip install \
+        --no-deps \
+        --prefix=/install \
+        -r requirements.txt
+
+# -----------------------------------------------------------------------------
+# STAGE 2: runtime (imagem final)
+# Apenas o necessário para executar a aplicação — sem compiladores, sem build tools
+# -----------------------------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+# Reutiliza as variáveis de ambiente essenciais para runtime
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# ── Segurança: usuário sem privilégios ────────────────────────────────────────
+# Nunca rodar aplicação como root em produção.
+# Criamos grupo e usuário "appuser" (UID/GID 1001) sem shell de login.
+RUN groupadd --system --gid 1001 appgroup \
+    && useradd --system --uid 1001 --gid appgroup --no-create-home --shell /sbin/nologin appuser
+
+# Instalar dependências de runtime do SO (apenas libpq para psycopg2)
+# Sem cache do apt para manter a imagem enxuta
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiar pacotes Python instalados no stage anterior
+COPY --from=builder /install /usr/local
+
+WORKDIR /app
+
+# Copiar o código-fonte da aplicação
+# Copiamos apenas os artefatos necessários para runtime (sem testes)
+COPY app.py        ./app.py
+COPY lib/          ./lib/
+
+# ── Segurança: permissões restritivas ────────────────────────────────────────
+# O diretório /app e seus arquivos pertencem ao appuser.
+# Nenhum arquivo deve ter permissão de escrita para o processo da aplicação,
+# exceto diretórios explicitamente destinados a dados mutáveis.
+RUN chown -R appuser:appgroup /app \
+    && chmod -R 550 /app
+
+# Alternar para o usuário sem privilégios antes de qualquer exposição de porta
+USER appuser
+
+# Documentar a porta exposta (não publica automaticamente — use -p no docker run)
+EXPOSE 8080
+
+# ── Variáveis de ambiente de configuração ────────────────────────────────────
+# NÃO incluir valores sensíveis aqui. Forneça-os em runtime via:
+#   - docker run --env DATABASE_URL=... --env API_KEY=...
+#   - docker-compose environment / env_file
+#   - Secrets managers (AWS Secrets Manager, Vault, etc.)
+# Os valores abaixo são apenas placeholders para documentar as variáveis esperadas.
+ENV DATABASE_URL="" \
+    API_KEY="" \
+    FLASK_ENV="production"
+
+# ── Health check ──────────────────────────────────────────────────────────────
+# O orchestrador (Kubernetes, ECS, Swarm) usa isso para saber se o container
+# está saudável antes de rotear tráfego.
+# Requer que /health retorne 200 na aplicação Flask.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" \
+    || exit 1
+
+# ── Entrypoint ────────────────────────────────────────────────────────────────
+# Gunicorn como servidor WSGI de produção:
+#   --bind 0.0.0.0:8080      → escuta em todas as interfaces na porta 8080
+#   --workers 4              → 4 workers (regra geral: 2 * núcleos + 1)
+#   --timeout 120            → mata workers travados após 2 min
+#   --log-level info         → nível de log adequado para produção
+#   --access-logfile -       → access log para stdout (coleta pelo runtime do container)
+#   --error-logfile -        → error log para stderr
+#   app:app                  → módulo "app", objeto Flask "app"
+CMD ["gunicorn", \
+     "--bind", "0.0.0.0:8080", \
+     "--workers", "4", \
+     "--timeout", "120", \
+     "--log-level", "info", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "app:app"]
+
+# =============================================================================
+# .dockerignore — Projeto Lift
+# Exclui arquivos desnecessários do build context, reduzindo:
+#   - Tamanho do contexto enviado ao daemon Docker
+#   - Risco de vazar arquivos sensíveis para a imagem
+# =============================================================================
+
+# Controle de versão
+.git/
+.gitignore
+
+# Testes (não vão para produção)
+tests/
+pytest.ini
+.pytest_cache/
+coverage.xml
+.coverage
+htmlcov/
+
+# Arquivos de ambiente local (NUNCA devem entrar na imagem)
+.env
+.env.*
+*.env
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Ambientes virtuais
+venv/
+.venv/
+env/
+ENV/
+
+# Ferramentas de desenvolvimento
+.vscode/
+.idea/
+*.iml
+
+# Documentação
+docs/
+*.md
+README*
+CHANGELOG*
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+
+# Docker compose de desenvolvimento
+docker-compose*.yml
+docker-compose*.yaml
+
+# Artefatos de build
+dist/
+build/
+*.egg-info/
+
+# Logs locais
+*.log
+logs/
+
+
+Justificativa: A Role define a persona com expertise técnica em infraestrutura, a Task detalha a ação específica de criar o Dockerfile com os requisitos do sistema Lift e o Format orienta a entrega de um código documentado e eficiente.
