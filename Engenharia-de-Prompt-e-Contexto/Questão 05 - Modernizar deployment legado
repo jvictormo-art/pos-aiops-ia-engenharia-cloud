@@ -1,0 +1,373 @@
+Questão 05 - Modernizar deployment legado
+
+Prompt: Hoje temos o manifest do Chronos (API gateway e a plataforma core, ponto de entrada de todo tráfego da empresa) defasado (escrito a três anos atrás) (Before). Queremos um manifesto modernizado e atualizado com todas as mudanças necessárias para refletir o padrão atual da empresa (After). Crie a versão modernizada do manifest abaixo com alta disponibilidade, imagem versionada (nada de latest), secrets fora do manifest, resource requests e limits, liveness e readiness probes, securityContext não-root e as demais práticas de produção que hoje são padrão na empresa (Bridge).
+
+manifest atual:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chronos-api
+  namespace: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chronos-api
+  template:
+    metadata:
+      labels:
+        app: chronos-api
+    spec:
+      containers:
+      - name: api
+        image: chronos-api:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DB_PASSWORD
+          value: "P@ssw0rd2023!"
+        - name: JWT_SECRET
+          value: "hvt-jwt-prod-secret"
+
+
+Modelo: Claude Sonnet 4.6 porque entendo ser um dos melhores para codificação.
+
+
+
+Output: Aqui está o manifesto modernizado. Um resumo de cada decisão tomada:
+Secrets externos
+O DB_PASSWORD e o JWT_SECRET saíram completamente do YAML. Um SecretProviderClass (CSI Driver) os puxa do cofre externo (AWS Secrets Manager, Vault, etc.) em tempo de execução. O cluster nunca armazena o valor em plaintext — nem no etcd.
+Alta disponibilidade
+
+replicas: 3 como piso mínimo
+topologySpreadConstraints garante distribuição entre zonas e nós distintos
+podAntiAffinity como reforço para evitar co-localização
+PodDisruptionBudget com minAvailable: 2 protege durante drains e upgrades de nó
+RollingUpdate com maxUnavailable: 1 para zero-downtime deploy
+
+Imagem versionada
+chronos-api:latest virou 123456789012.dkr.ecr.us-east-1.amazonaws.com/chronos-api:2.4.1. O registry ECR é só um exemplo — basta ajustar para o registry da empresa.
+Resources
+Requests e limits definidos explicitamente. Sem isso o scheduler não consegue planejar corretamente e um pod descontrolado pode impactar vizinhos no nó.
+Probes em três camadas
+
+startupProbe — dá espaço para cold-start sem acionar o liveness prematuramente
+readinessProbe — retira o pod do balanceamento enquanto não estiver pronto
+livenessProbe — reinicia se a aplicação travar após subir
+
+SecurityContext não-root
+
+runAsNonRoot: true, UID/GID 10001 fixos
+readOnlyRootFilesystem: true — filesystem imutável em runtime
+capabilities: drop: ALL — sem Linux capabilities desnecessárias
+seccompProfile: RuntimeDefault
+
+HPA
+Escala de 3 a 10 réplicas com base em CPU (70%) e memória (80%), com stabilizationWindowSeconds: 300 para evitar flapping na descida.
+
+Checklist antes de aplicar: confirmar o UID 10001 na imagem, ajustar o provider do SecretProviderClass (aws/vault/azure), substituir o registry ECR pelo da empresa, e validar os endpoints /healthz/* na aplicação.
+
+
+# ==============================================================================
+# CHRONOS API — Kubernetes Manifests (Production)
+# Atualizado em: 2026-05-14
+# Responsável: Platform Engineering / Core Reliability
+# Histórico: Modernização do manifest original (2023) para os padrões atuais.
+#   - HA com múltiplas réplicas e PodDisruptionBudget
+#   - Imagem versionada (sem latest)
+#   - Secrets externos via SecretProviderClass (CSI Driver)
+#   - Resource requests/limits definidos
+#   - Liveness, Readiness e Startup probes
+#   - SecurityContext não-root com filesystem read-only
+#   - Topology spread para resiliência multi-zona
+#   - HPA para escala automática
+# ==============================================================================
+
+---
+# ------------------------------------------------------------------------------
+# Secret Store — integração com o cofre externo (ex: AWS Secrets Manager / Vault)
+# Os valores sensíveis NÃO existem dentro do cluster; o CSI Driver os injeta
+# em tempo de execução a partir da fonte de verdade externa.
+# ------------------------------------------------------------------------------
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: chronos-api-secrets
+  namespace: production
+spec:
+  provider: aws           # Trocar por "vault" ou "azure" conforme o ambiente
+  parameters:
+    objects: |
+      - objectName: "production/chronos-api/db-password"
+        objectType: "secretsmanager"
+        objectAlias: "DB_PASSWORD"
+      - objectName: "production/chronos-api/jwt-secret"
+        objectType: "secretsmanager"
+        objectAlias: "JWT_SECRET"
+  secretObjects:
+    - secretName: chronos-api-secrets
+      type: Opaque
+      data:
+        - objectName: DB_PASSWORD
+          key: db-password
+        - objectName: JWT_SECRET
+          key: jwt-secret
+
+---
+# ------------------------------------------------------------------------------
+# Deployment principal
+# ------------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chronos-api
+  namespace: production
+  labels:
+    app: chronos-api
+    app.kubernetes.io/name: chronos-api
+    app.kubernetes.io/component: api-gateway
+    app.kubernetes.io/part-of: chronos
+    app.kubernetes.io/managed-by: helm          # ou argocd, flux, etc.
+  annotations:
+    # Permite rollback rastreável via kubectl rollout history
+    kubernetes.io/change-cause: "release/v2.4.1 — manifest modernization (2026-05)"
+spec:
+  # --- Alta Disponibilidade ---
+  replicas: 3                                   # Mínimo de 3 para suportar PDB abaixo
+
+  selector:
+    matchLabels:
+      app: chronos-api
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1                         # Nunca derruba mais de 1 pod por vez
+      maxSurge: 1                               # Sobe 1 pod novo antes de derrubar o antigo
+
+  template:
+    metadata:
+      labels:
+        app: chronos-api
+        app.kubernetes.io/name: chronos-api
+        app.kubernetes.io/version: "2.4.1"
+        # Label para o Prometheus saber que deve fazer scrape neste pod
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+      annotations:
+        # Força restart quando o SecretProviderClass mudar
+        checksum/secrets: "{{ include (print $.Template.BasePath \"/secretproviderclass.yaml\") . | sha256sum }}"
+
+    spec:
+      # --- Distribuição entre zonas (resiliência a falha de AZ) ---
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: chronos-api
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: chronos-api
+
+      # --- Anti-afinidade: evita dois pods no mesmo nó ---
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: chronos-api
+                topologyKey: kubernetes.io/hostname
+
+      # --- Segurança: contexto de nível de Pod ---
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001          # UID não-root fixo; deve existir na imagem
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault    # Habilita o perfil seccomp padrão do runtime
+
+      # --- Termination grace period (dá tempo ao proxy de drenar conexões) ---
+      terminationGracePeriodSeconds: 60
+
+      # --- Montagem do volume de secrets via CSI ---
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: chronos-api-secrets
+
+      containers:
+        - name: api
+          # Imagem versionada — NUNCA usar :latest em produção
+          image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/chronos-api:2.4.1
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          # --- Variáveis de ambiente: somente valores não-sensíveis aqui ---
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: PORT
+              value: "8080"
+            # Valores sensíveis injetados a partir do Secret criado pelo CSI Driver
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: chronos-api-secrets
+                  key: db-password
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: chronos-api-secrets
+                  key: jwt-secret
+
+          # --- Montagem do volume de secrets (necessário para o CSI sincronizar) ---
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets
+              readOnly: true
+
+          # --- Recursos: sempre definir requests E limits ---
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"       # 1 vCPU de burst
+              memory: "512Mi"    # OOMKill antes de impactar o nó
+
+          # --- Startup Probe: dá tempo para cold-start sem interferir nos outros probes ---
+          startupProbe:
+            httpGet:
+              path: /healthz/startup
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 24   # 24 * 5s = 2 minutos máximos para startup
+            successThreshold: 1
+
+          # --- Readiness Probe: controla quando o pod recebe tráfego ---
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 3
+
+          # --- Liveness Probe: reinicia o pod se a aplicação travar ---
+          livenessProbe:
+            httpGet:
+              path: /healthz/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5
+
+          # --- Segurança: contexto de nível de Container ---
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true        # Filesystem imutável em runtime
+            capabilities:
+              drop:
+                - ALL                           # Remove todas as Linux capabilities
+
+---
+# ------------------------------------------------------------------------------
+# HorizontalPodAutoscaler — escala automática baseada em CPU e memória
+# ------------------------------------------------------------------------------
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: chronos-api
+  namespace: production
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: chronos-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300    # Evita flapping: aguarda 5 min antes de escalar para baixo
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+
+---
+# ------------------------------------------------------------------------------
+# PodDisruptionBudget — garante disponibilidade durante manutenções e drains
+# ------------------------------------------------------------------------------
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: chronos-api
+  namespace: production
+spec:
+  minAvailable: 2          # Com 3 réplicas, garante que ao menos 2 estejam sempre up
+  selector:
+    matchLabels:
+      app: chronos-api
+
+---
+# ------------------------------------------------------------------------------
+# Service — expõe o Deployment internamente no cluster
+# O Ingress / API Gateway externo aponta para este Service.
+# ------------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronos-api
+  namespace: production
+  labels:
+    app: chronos-api
+spec:
+  selector:
+    app: chronos-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+  type: ClusterIP
+
+
+
+Justificativa: Before definido com o estado atual do manifest, After descrevendo como queremos e Bridge descrvendo o caminho para modernização.
+

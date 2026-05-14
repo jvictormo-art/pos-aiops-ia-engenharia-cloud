@@ -1,0 +1,110 @@
+Questão 07 - Runbook para alerta recorrente
+
+
+Prompt: Você é líder de um time de SRE (Role) e responde pelo plantão. Com base no ambiente descrito abaixo e sabendo que toda semana pelo menos 4 vezes o Beacon dispara o mesmo alerta no canal de plantão: [CRITICAL] High memory usage on Chronos API pods (>85% for 10min) (Input), faça um plano de investigação e solução (Step) criando um runbook que cubra os passos iniciais de diagnóstico (com os comandos específicos a rodar), a verificação esperada ao final de cada passo, os critérios objetivos para escalar para o time sênior e o critério para encerrar o incidente (Expectation).
+
+Chronos roda no EKS, namespace production, 6 réplicas com HPA configurado (min 4, max 12, CPU target 70%).
+Deploy via Argo CD a partir do repositório hvt/chronos-api.
+Dependências diretas: Ledger (PostgreSQL) e Reactor (filas SQS).
+Observabilidade: métricas expostas em /metrics, logs centralizados no Beacon, dashboards em Grafana.
+Ferramentas disponíveis para o plantão: kubectl, aws cli, argocd cli.
+Canal de plantão: #oncall-chronos no Slack.
+Time sênior de escalação: @chronos-core (SLA de resposta: 15 minutos em horário comercial, 30 fora).
+
+
+
+Modelo: Gemini 3 Flash porque performa bem em relatórios/runbooks.
+
+
+
+Output: Como líder de SRE, meu foco aqui é interromper a recorrência desse alerta (toil) e garantir que o time de plantão tenha um caminho claro para mitigar o risco de indisponibilidade. O fato de o alerta disparar 4 vezes por semana sugere um memory leak ou um subdimensionamento crônico de recursos, especialmente porque o HPA está atrelado apenas à CPU.
+
+Abaixo, apresento o plano de resposta e o Runbook operacional.
+
+📋 Plano de Investigação e Solução: Chronos API
+1. Diagnóstico de Curto Prazo (O Incidente)
+O objetivo imediato é evitar o OOMKilled em massa e a degradação da experiência do usuário.
+
+2. Ações de Médio Prazo (Correção Estrutural)
+Ajuste de HPA: Adicionar uma métrica de memória ao HPA ou mudar para uma política baseada em recursos combinados.
+
+Análise de Heap Dump: Solicitar ao time @chronos-core um perfilamento de memória para identificar vazamentos no código.
+
+📖 Runbook: [CRITICAL] High Memory Usage - Chronos API
+Fase 1: Triagem e Verificação de Impacto
+Passo 1: Validar o estado atual dos pods e consumo de recursos.
+
+Comando:
+
+Bash
+kubectl top pods -n production -l app=chronos-api
+kubectl get pods -n production -l app=chronos-api
+Verificação Esperada: Confirmar se todos os 6 pods estão acima de 85% ou se é um comportamento isolado em um pod específico.
+
+Passo 2: Verificar se houve reinicializações recentes por falta de memória.
+
+Comando:
+
+Bash
+    kubectl get pods -n production -l app=chronos-api -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.containerStatuses[0].restartCount}{"\t"}{.status.containerStatuses[0].lastState.terminated.reason}{"\n"}{end}'
+    ```
+*   **Verificação Esperada:** Se o motivo for `OOMKilled`, o sistema já atingiu o limite físico (Limits) definido no manifesto.
+
+---
+
+### **Fase 2: Diagnóstico de Dependências**
+**Passo 3:** Verificar o volume de mensagens pendentes no **Reactor (SQS)**. Um acúmulo de filas pode causar buffer excessivo em memória.
+*   **Comando:**
+    
+```bash
+    aws sqs get-queue-attributes --queue-url [URL_DA_FILA] --attribute-names ApproximateNumberOfMessages
+    ```
+*   **Verificação Esperada:** Se o número de mensagens estiver crescendo exponencialmente, o problema é o throughput da API versus o consumo da fila.
+
+**Passo 4:** Checar logs no **Beacon** em busca de erros de conexão com o **Ledger (PostgreSQL)** ou timeouts.
+*   **Ação:** Acessar o dashboard do Beacon e filtrar por `level:error` e `service:chronos-api`.
+
+---
+
+### **Fase 3: Mitigação Inicial**
+Se a memória continuar subindo e o HPA não escalar (pois a CPU está abaixo de 70%):
+
+**Opção A (Escalonamento Manual):**
+*   **Comando:**
+    ```bash
+    kubectl scale deployment chronos-api -n production --replicas=10
+    ```
+*   **Expectativa:** Distribuir a carga e ganhar tempo de análise.
+
+**Opção B (Restart Progressivo):**
+Se houver suspeita de memory leak:
+*   **Comando:**
+    ```bash
+    kubectl rollout restart deployment chronos-api -n production
+    ```
+*   **Expectativa:** Liberar a memória retida, retornando ao baseline de consumo.
+
+---
+
+## 🚨 Critérios de Escalação (@chronos-core)
+Acionar o time sênior imediatamente se:
+1.  **Persistência:** O consumo de memória retornar a >85% em menos de 30 minutos após um `rollout restart`.
+2.  **Cascata:** O banco de dados **Ledger** apresentar alta latência ou número de conexões estourado simultaneamente ao alerta de memória.
+3.  **Erro de Deploy:** O Argo CD mostrar um diff ou erro de sincronização persistente no repositório `hvt/chronos-api`.
+4.  **Indisponibilidade:** O `kubectl get pods` mostrar pods em `CrashLoopBackOff` que não estabilizam.
+
+---
+
+## ✅ Critério de Encerramento do Incidente
+O incidente será considerado resolvido quando:
+1.  **Estabilização:** O uso de memória de todos os pods do namespace `production` estiver abaixo de **70% por pelo menos 20 minutos**.
+2.  **Saúde do HPA:** O HPA estiver operando dentro dos limites normais e as métricas de `/metrics` não indicarem crescimento linear de memória sem desalocação (GC working properly).
+3.  **Comunicação:** O status do incidente for atualizado no canal `#oncall-chronos`.
+
+> **Nota do SRE Lead:** Após o encerramento, é obrigatória a abertura de um ticket de *Post-Mortem* para discutir a implementação de **VPA (Vertical Pod Autoscaler)** em modo recomendação e a revisão dos limites de memória no Helm Chart.
+
+
+Justificativa: Role com líder de SRE, Input com com o alerta e informações do ambiente, plano de investigação é o Step e a Expectation define que o runbook seja eficaz para solucionar o problema.
+
+
+
