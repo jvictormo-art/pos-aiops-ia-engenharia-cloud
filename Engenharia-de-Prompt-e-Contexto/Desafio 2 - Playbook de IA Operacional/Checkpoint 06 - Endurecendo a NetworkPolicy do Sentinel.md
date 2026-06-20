@@ -72,7 +72,10 @@ Cloud Sonnet 4.6 para execução e Opus 4.8 para geração do prompt.
 ### Output Real ###
 
 {{MANIFESTO_PERMISSIVO}}
-yamlapiVersion: networking.k8s.io/v1
+```
+yaml
+
+lapiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: sentinel-allow
@@ -86,6 +89,7 @@ spec:
     - {}
   egress:
     - {}
+```
 {{REGRAS_DO_PADRAO}}
 
 Ingress: aceitar tráfego do Relay e do API gateway
@@ -112,7 +116,10 @@ Nenhum comentário de fluxo — impossível auditar o que cada regra libera
 
 
 2. Manifesto Corrigido — v1
-yaml# ============================================================
+```
+yaml
+
+# ============================================================
 # DEFAULT-DENY: bloqueia todo tráfego no namespace por padrão
 # ============================================================
 apiVersion: networking.k8s.io/v1
@@ -196,6 +203,7 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+```
 
 3. Verificação e Refino
 Rodada 1 — Perguntas do revisor de segurança
@@ -223,7 +231,10 @@ Esse label é adicionado automaticamente pelo Kubernetes a partir da versão 1.2
 
 Versão Revisada — v2
 A única correção material da verificação foi o item P4: ingress sem restrição de porta. A v2 adiciona a declaração de porta nos blocos de ingress. Como o padrão não especificou as portas exatas do Sentinel, declaro a porta HTTP padrão de serviços internos (8080) e adiciono comentário de pendência explícita para o time confirmar.
-yaml# ============================================================
+```
+yaml
+
+# ============================================================
 # DEFAULT-DENY: bloqueia todo tráfego no namespace por padrão
 # ============================================================
 apiVersion: networking.k8s.io/v1
@@ -315,6 +326,7 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+```
 
 4. Registro de Iterações
 #O que a versão entregou x O que a verificação apontou x Como foi endereçado
