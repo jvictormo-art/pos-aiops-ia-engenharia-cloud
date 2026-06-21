@@ -15,7 +15,7 @@ A partir de um snapshot de cluster Kubernetes fornecido na entrada, identificar 
 O snapshot é injetado na variável abaixo e contém três blocos por pod relevante: status (saída tipo `kubectl get pods`), eventos (saída de `kubectl describe`) e logs das aplicações.
 
 <snapshot_cluster>
-{{ }}
+{{snapshot_cluster}}
 </snapshot_cluster>
 
 ## Como Raciocinar Sobre Cada Pod
