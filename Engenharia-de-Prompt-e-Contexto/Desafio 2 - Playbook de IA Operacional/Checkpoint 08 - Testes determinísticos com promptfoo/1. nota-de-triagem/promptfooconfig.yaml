@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+
+# Learn more about building a configuration: https://promptfoo.dev/docs/configuration/guide
+
+description: "Avaliação do prompt de triagem para alertas de autoscaler do Sentinel, focando em identificar a causa raiz e sugerir ações corretivas."
+
+prompts:
+  - file://prompt.md
+
+providers:
+  - anthropic:messages:claude-sonnet-4-6
+
+defaultTest:
+  assert:
+    - type: contains
+      value: "ALERTA:"
+    - type: contains
+      value: "IMPACTO:"
+    - type: contains
+      value: "HIPÓTESE INICIAL:"
+    - type: contains
+      value: "AÇÃO IMEDIATA:"
+    - type: contains
+      value: "ESCALAR PARA:"
+    - type: regex
+      value: "ESCALAR PARA:.*@\\w+"
+    - type: javascript
+      value: "output.trim().split('\\n').length <= 8"
+    - type: latency
+      threshold: 5000
+    - type: cost
+      threshold: 0.01
+
+tests:
+  - vars:
+      ALERTA: >
+        2026-05-12 14:02:09 UTC [Sentinel] autoscaler hit max replicas (60/60)
+        on sentinel-api, queue depth on Relay growing 2k/min, CPU avg 88%,
+        tenant stark-industries sending 4x baseline volume after onboarding new region
+
+  - vars:
+      ALERTA: >
+        2026-05-13 03:11:00 UTC [Relay] ingest reject rate 6% for 8min,
+        tenant wakanda-systems, buffer saturated after deploy 02:55
+
+  - vars:
+      ALERTA: >
+        2026-05-13 11:40:22 UTC [Forge] consumer lag 9min and climbing,
+        batch forge-batch-ingest delayed after previous job failure,
+        downstream Sentinel starting to lag
