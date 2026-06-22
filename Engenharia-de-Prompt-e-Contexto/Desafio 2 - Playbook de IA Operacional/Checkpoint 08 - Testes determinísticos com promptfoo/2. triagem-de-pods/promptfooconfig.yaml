@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+
+description: "Avaliação do prompt de triagem de pods do Sentinel, focando em identificar a causa raiz e sugerir ações corretivas."
+
+prompts:
+  - file://prompt.md
+
+providers:
+  - anthropic:messages:claude-haiku-4-5-20251001
+
+tests:
+  # Entrada 1 — pod reiniciando por OOMKilled
+  - vars:
+      snapshot_cluster: |
+        $ kubectl get pods -n sentinel-prod
+        NAME                            READY   STATUS             RESTARTS       AGE
+        sentinel-api-7d9c8b6f4-2xk9p    1/1     Running            0              6d
+        sentinel-api-7d9c8b6f4-h4m2t    0/1     CrashLoopBackOff   14 (90s ago)   42m
+        sentinel-worker-5b8f9c8d-jq7rs  1/1     Running            0              6d
+        sentinel-scheduler-6c4d7f-nn8vx 1/1     Running            0              6d
+
+        $ kubectl describe pod sentinel-api-7d9c8b6f4-h4m2t -n sentinel-prod
+            State:          Waiting
+              Reason:       CrashLoopBackOff
+            Last State:     Terminated
+              Reason:       OOMKilled
+              Exit Code:    137
+            Limits:         memory: 512Mi
+            Requests:       memory: 256Mi
+        Events:
+          Warning  BackOff  2m (x18 over 40m)   kubelet  Back-off restarting failed container api
+
+        $ kubectl logs sentinel-api-7d9c8b6f4-h4m2t -n sentinel-prod --previous
+        2026-05-13 10:14:02 [INFO]  [api] startup complete, version 2.9.1
+        2026-05-13 10:14:48 [INFO]  [cache] loading 6h alert cache (heap 410Mi/512Mi)
+        2026-05-13 10:15:10 [WARN]  [runtime] high GC pressure, heap 498Mi/512Mi
+        2026-05-13 10:15:12 [FATAL] [runtime] out of memory, shutting down process
+    assert:
+      - type: icontains
+        value: "sentinel-api-7d9c8b6f4-h4m2t"
+      - type: icontains
+        value: "OOMKilled"
+
+  # Entrada 2 — pods que não sobem (ImagePullBackOff + Pending/cpu insuficiente)
+  - vars:
+      snapshot_cluster: |
+        $ kubectl get pods -n sentinel-prod
+        NAME                            READY   STATUS             RESTARTS   AGE
+        sentinel-api-7d9c8b6f4-2xk9p    1/1     Running            0          6d
+        sentinel-api-7d9c8b6f4-zzp10    0/1     ImagePullBackOff   0          8m
+        sentinel-ingest-8f7a9c5b-4dkqm  0/1     Pending            0          8m
+        sentinel-scheduler-6c4d7f-nn8vx 1/1     Running            0          6d
+
+        $ kubectl describe pod sentinel-api-7d9c8b6f4-zzp10 -n sentinel-prod
+            State:    Waiting
+              Reason: ImagePullBackOff
+            Image:    registry.aegis.io/sentinel-api:2.9.2
+        Events:
+          Warning  Failed   7m    kubelet  Failed to pull image "registry.aegis.io/sentinel-api:2.9.2": manifest unknown
+          Warning  Failed   7m    kubelet  Error: ErrImagePull
+          Normal   BackOff  6m    kubelet  Back-off pulling image "registry.aegis.io/sentinel-api:2.9.2"
+
+        $ kubectl describe pod sentinel-ingest-8f7a9c5b-4dkqm -n sentinel-prod
+            State:    Waiting
+              Reason: Pending
+            Requests: cpu: 2
+        Events:
+          Warning  FailedScheduling  7m    default-scheduler  0/6 nodes are available: 6 Insufficient cpu
+    assert:
+      - type: icontains
+        value: "2.9.2"
+      - type: regex
+        value: "(?i)ImagePullBackOff|manifest unknown|ErrImagePull"
+      - type: icontains
+        value: "Insufficient"
+
+  # Entrada 3 — cluster saudável
+  - vars:
+      snapshot_cluster: |
+        $ kubectl get pods -n sentinel-prod
+        NAME                            READY   STATUS    RESTARTS     AGE
+        sentinel-api-7d9c8b6f4-2xk9p    1/1     Running   0            6d
+        sentinel-api-7d9c8b6f4-h4m2t    1/1     Running   0            6d
+        sentinel-worker-5b8f9c8d-jq7rs  1/1     Running   1 (3d ago)   6d
+        sentinel-scheduler-6c4d7f-nn8vx 1/1     Running   0            6d
+
+        $ kubectl logs sentinel-api-7d9c8b6f4-2xk9p -n sentinel-prod --tail=3
+        2026-05-13 11:02:31 [INFO] [api] health check OK, 0 errors in the last 5min
+        2026-05-13 11:03:31 [INFO] [api] processed 4.2k alerts/min, p99 latency 120ms
+        2026-05-13 11:04:31 [INFO] [api] health check OK
+    assert:
+      - type: regex
+        value: "(?i)saudável|nenhum pod|no pod|cluster saud"
+      - type: javascript
+        value: "!/(CrashLoopBackOff|OOMKilled|ImagePullBackOff|Pending|Error)/i.test(output)"
