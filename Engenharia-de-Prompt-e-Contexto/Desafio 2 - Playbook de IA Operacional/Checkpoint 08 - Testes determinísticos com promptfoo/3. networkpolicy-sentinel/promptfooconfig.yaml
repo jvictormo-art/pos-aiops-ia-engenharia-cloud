@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+
+description: "Avaliação do prompt de endurecimento de NetworkPolicy Kubernetes, verificando que a política gerada segue default-deny, cobre os fluxos exigidos e possui comentários em cada regra."
+
+prompts:
+  - file://prompt.md
+
+providers:
+  - anthropic:messages:claude-haiku-4-5-20251001
+
+tests:
+  - vars:
+      MANIFESTO_PERMISSIVO: |
+        # manifesto barrado pela revisão de segurança — permissivo demais
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: sentinel-allow
+          namespace: sentinel-prod
+        spec:
+          podSelector: {}          # aplica a todos os pods do namespace
+          policyTypes:
+            - Ingress
+            - Egress
+          ingress:
+            - {}                   # libera QUALQUER origem
+          egress:
+            - {}                   # libera QUALQUER destino
+
+      REGRAS_DO_PADRAO: |
+        NetworkPolicy para o namespace "sentinel-prod":
+        - pods do Sentinel só aceitam tráfego de entrada do Relay (consumo de eventos) e do gateway de API da plataforma
+        - pods do Sentinel só fazem saída para: Forge (warehouse, porta 5432), Cerebro (busca, porta 9200) e DNS interno
+        - nada de "allow all" em ingress ou egress
+        - política default-deny explícita no namespace
+        - toda regra precisa de comentário dizendo qual fluxo legítimo ela libera
+
+      MAPA_DE_SERVICOS: |
+        Sentinel    → namespace sentinel-prod, pods com label app=sentinel
+        Relay       → namespace relay-prod,    pods com label app=relay
+        API gateway → namespace edge,          pods com label app=api-gateway
+        Forge       → namespace forge-prod,    pods com label app=forge,   porta 5432 (Postgres do warehouse)
+        Cerebro     → namespace cerebro-prod,  pods com label app=cerebro, porta 9200 (Elasticsearch)
+        DNS interno → namespace kube-system,   pods com label k8s-app=kube-dns, porta 53
+
+    assert:
+      # 1. YAML válido com kind: NetworkPolicy e policyTypes contendo Ingress e Egress
+      - type: icontains
+        value: "kind: NetworkPolicy"
+      - type: icontains
+        value: "policyTypes"
+      - type: icontains
+        value: "Ingress"
+      - type: icontains
+        value: "Egress"
+
+      # 2. Sem regra allow-all — a saída não deve conter "- {}"
+      - type: javascript
+        value: "!output.includes('- {}')"
+
+      # 3. Egress para Forge (5432) e Cerebro (9200); ingress do Relay e do API gateway
+      - type: icontains
+        value: "5432"
+      - type: icontains
+        value: "9200"
+      - type: icontains
+        value: "app: relay"
+      - type: icontains
+        value: "app: api-gateway"
+
+      # 4. Toda regra tem comentário — ao menos 1 linha de comentário YAML na saída
+      - type: javascript
+        value: "(output.match(/^\\s*#/gm) || []).length >= 1"
