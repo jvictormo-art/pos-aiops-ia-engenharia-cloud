@@ -1,0 +1,119 @@
+# Pipeline de qualidade — suíte de evals do promptfoo
+#
+# Roda a cada PR e push para main, falhando o build quando um prompt regride.
+#
+# ── Regra de gate ──────────────────────────────────────────────────────────
+# Assertions determinísticas (icontains, latency, cost) E o LLM-as-judge
+# precisam passar para o build ser aprovado. A rubrica já embute tolerância
+# (gate em >= 6/8), o que absorve a flutuação não-determinística típica do
+# juiz sem reprovar builds por acidente. Se o juiz reprovar, o prompt está
+# no limiar e merece revisão.
+#
+# ── Escopo de execução ─────────────────────────────────────────────────────
+# Pull Request  → apenas os prompts alterados (prompt*.md, promptfooconfig.yaml,
+#                 prompt.judge.xml, prompt.rubric.md no mesmo diretório).
+#                 Custo típico: ~US$ 0,02–0,05 por PR.
+# Push → main   → suíte completa como gate final de regressão.
+#                 Custo estimado: ~US$ 0,18 (6 prompts × ~US$ 0,03 cada).
+#
+# ── Segredos necessários ───────────────────────────────────────────────────
+# Configurar em: Settings → Secrets and variables → Actions → New repository secret
+#   ANTHROPIC_API_KEY  chave da API Anthropic (gerador Haiku + juiz Sonnet)
+
+name: Eval Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ── Detecta quais configs precisam rodar ───────────────────────────────────
+  detect:
+    name: Detect changed prompts
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      has_evals: ${{ steps.detect.outputs.has_evals }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # histórico completo necessário para o diff de PR
+
+      - name: Build eval matrix
+        id: detect
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.sha }}"
+            CHANGED=$(git diff --name-only "$BASE" "$HEAD" || true)
+
+            declare -A seen
+            CONFIGS=()
+
+            while IFS= read -r f; do
+              [[ -z "$f" ]] && continue
+              dir=$(dirname "$f")
+              cfg="$dir/promptfooconfig.yaml"
+
+              # o próprio config foi alterado
+              if [[ "$f" == *"promptfooconfig.yaml" && -f "$f" ]]; then
+                [[ -z "${seen[$f]+x}" ]] && CONFIGS+=("$f") && seen["$f"]=1
+              # um arquivo de prompt no mesmo diretório foi alterado
+              elif [[ "$f" == *"prompt"* && -f "$cfg" ]]; then
+                [[ -z "${seen[$cfg]+x}" ]] && CONFIGS+=("$cfg") && seen["$cfg"]=1
+              fi
+            done <<< "$CHANGED"
+          else
+            # push para main: suíte completa
+            mapfile -t CONFIGS < <(find . -name "promptfooconfig.yaml" | sort)
+          fi
+
+          if [[ ${#CONFIGS[@]} -eq 0 ]]; then
+            echo 'matrix={"config":[]}' >> "$GITHUB_OUTPUT"
+            echo 'has_evals=false'      >> "$GITHUB_OUTPUT"
+          else
+            JSON=$(printf '%s\n' "${CONFIGS[@]}" | jq -R . | jq -sc '{config: .}')
+            echo "matrix=$JSON"    >> "$GITHUB_OUTPUT"
+            echo 'has_evals=true'  >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Summary — no prompt files changed
+        if: steps.detect.outputs.has_evals == 'false'
+        run: echo "Nenhum arquivo de prompt alterado — eval suite ignorada."
+
+  # ── Roda cada config em paralelo ──────────────────────────────────────────
+  eval:
+    name: "Eval — ${{ matrix.config }}"
+    needs: detect
+    if: needs.detect.outputs.has_evals == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # necessário para postar comentário no PR
+    strategy:
+      fail-fast: false        # um config falhando não cancela os demais
+      matrix: ${{ fromJson(needs.detect.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache promptfoo responses
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/promptfoo
+          key: ${{ runner.os }}-promptfoo-${{ matrix.config }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-promptfoo-${{ matrix.config }}-
+            ${{ runner.os }}-promptfoo-
+
+      - name: Run promptfoo eval
+        uses: promptfoo/promptfoo-action@v1
+        with:
+          config: ${{ matrix.config }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache-path: ~/.cache/promptfoo
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
