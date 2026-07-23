@@ -9,7 +9,7 @@ prompts:
 
 providers:
   - anthropic:messages:claude-sonnet-4-6
-  - openai:gpt-4o-mini
+  - google:gemini-2.5-flash
 
 defaultTest:
   assert:
