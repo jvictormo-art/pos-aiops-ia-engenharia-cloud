@@ -7,14 +7,16 @@ prompts:
 
 providers:
   - anthropic:messages:claude-haiku-4-5-20251001
-  - google:gemini-2.5-flash
+  - ollama:chat:llama3.1:8b
 
 defaultTest:
   assert:
     - type: latency
       threshold: 5000
-    - type: cost
-      threshold: 0.01
+    # cost nativo do promptfoo quebra em providers locais (Ollama) que nao reportam
+    # custo; tratamos ausencia de custo como $0 (inferencia local e gratuita por definicao)
+    - type: javascript
+      value: "context.providerResponse.cost === undefined || context.providerResponse.cost <= 0.01"
 
 tests:
   # Entrada 1 — pod reiniciando por OOMKilled
