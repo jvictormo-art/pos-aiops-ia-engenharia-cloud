@@ -7,7 +7,7 @@ prompts:
 
 providers:
   - anthropic:messages:claude-haiku-4-5-20251001
-  - openai:gpt-4o-mini
+  - google:gemini-2.5-flash
 
 defaultTest:
   assert:
