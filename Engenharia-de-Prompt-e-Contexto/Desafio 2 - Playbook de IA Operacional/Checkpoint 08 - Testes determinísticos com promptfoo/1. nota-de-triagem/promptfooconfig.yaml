@@ -9,6 +9,7 @@ prompts:
 
 providers:
   - anthropic:messages:claude-sonnet-4-6
+  - openai:gpt-4o-mini
 
 defaultTest:
   assert:
