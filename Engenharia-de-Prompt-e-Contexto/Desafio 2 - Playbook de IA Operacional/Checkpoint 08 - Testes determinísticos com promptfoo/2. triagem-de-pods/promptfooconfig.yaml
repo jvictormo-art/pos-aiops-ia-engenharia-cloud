@@ -7,6 +7,14 @@ prompts:
 
 providers:
   - anthropic:messages:claude-haiku-4-5-20251001
+  - openai:gpt-4o-mini
+
+defaultTest:
+  assert:
+    - type: latency
+      threshold: 5000
+    - type: cost
+      threshold: 0.01
 
 tests:
   # Entrada 1 — pod reiniciando por OOMKilled
@@ -69,8 +77,8 @@ tests:
     assert:
       - type: icontains
         value: "2.9.2"
-      - type: regex
-        value: "(?i)ImagePullBackOff|manifest unknown|ErrImagePull"
+      - type: javascript
+        value: "/(ImagePullBackOff|manifest unknown|ErrImagePull)/i.test(output)"
       - type: icontains
         value: "Insufficient"
 
@@ -89,7 +97,7 @@ tests:
         2026-05-13 11:03:31 [INFO] [api] processed 4.2k alerts/min, p99 latency 120ms
         2026-05-13 11:04:31 [INFO] [api] health check OK
     assert:
-      - type: regex
-        value: "(?i)saudável|nenhum pod|no pod|cluster saud"
+      - type: javascript
+        value: "/(saudável|nenhum pod|no pod|cluster saud)/i.test(output)"
       - type: javascript
         value: "!/(CrashLoopBackOff|OOMKilled|ImagePullBackOff|Pending|Error)/i.test(output)"
