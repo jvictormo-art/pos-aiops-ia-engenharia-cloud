@@ -7,6 +7,14 @@ prompts:
 
 providers:
   - anthropic:messages:claude-haiku-4-5-20251001
+  - openai:gpt-4o-mini
+
+defaultTest:
+  assert:
+    - type: latency
+      threshold: 5000
+    - type: cost
+      threshold: 0.01
 
 tests:
   - vars:
@@ -54,9 +62,12 @@ tests:
       - type: icontains
         value: "Egress"
 
-      # 2. Sem regra allow-all — a saída não deve conter "- {}"
+      # 2. Sem regra allow-all — verifica só dentro dos blocos de código YAML da resposta,
+      #    ignorando o texto de diagnóstico que cita o manifesto original com "- {}"
       - type: javascript
-        value: "!output.includes('- {}')"
+        value: |
+          const blocks = (output.match(/```yaml[\s\S]*?```/g) || []).join('\n');
+          !blocks.includes('- {}')
 
       # 3. Egress para Forge (5432) e Cerebro (9200); ingress do Relay e do API gateway
       - type: icontains
