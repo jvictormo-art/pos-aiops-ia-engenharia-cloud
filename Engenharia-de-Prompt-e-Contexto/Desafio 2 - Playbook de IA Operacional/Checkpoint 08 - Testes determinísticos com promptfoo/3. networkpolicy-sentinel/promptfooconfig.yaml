@@ -7,14 +7,16 @@ prompts:
 
 providers:
   - anthropic:messages:claude-haiku-4-5-20251001
-  - google:gemini-2.5-flash
+  - ollama:chat:llama3.1:8b
 
 defaultTest:
   assert:
     - type: latency
       threshold: 5000
-    - type: cost
-      threshold: 0.01
+    # cost nativo do promptfoo quebra em providers locais (Ollama) que nao reportam
+    # custo; tratamos ausencia de custo como $0 (inferencia local e gratuita por definicao)
+    - type: javascript
+      value: "context.providerResponse.cost === undefined || context.providerResponse.cost <= 0.01"
 
 tests:
   - vars:
@@ -62,12 +64,12 @@ tests:
       - type: icontains
         value: "Egress"
 
-      # 2. Sem regra allow-all — verifica só dentro dos blocos de código YAML da resposta,
-      #    ignorando o texto de diagnóstico que cita o manifesto original com "- {}"
+      # 2. Sem regra allow-all dentro de blocos YAML — o modelo pode citar "- {}" no
+      #    diagnóstico textual, então a verificação se restringe ao conteúdo dos blocos de código
       - type: javascript
         value: |
-          const blocks = (output.match(/```yaml[\s\S]*?```/g) || []).join('\n');
-          !blocks.includes('- {}')
+          const blocks = (output.match(/```[\s\S]*?```/g) || []).join('\n');
+          return !blocks.includes('- {}');
 
       # 3. Egress para Forge (5432) e Cerebro (9200); ingress do Relay e do API gateway
       - type: icontains
