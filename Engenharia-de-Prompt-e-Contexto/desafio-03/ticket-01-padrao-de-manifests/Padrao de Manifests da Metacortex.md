@@ -201,7 +201,7 @@ Exceção a regra obrigatória precisa de aprovação escrita de Segurança & Co
 
 Histórico
 
-2026-07-29 — automountServiceAccountToken: false passa de recomendado a obrigatório
-2026-05-14 — Adicionado o bloco de vocabulário a pedido do onboarding
-2026-03-02 — replicas >= 2 em prod passa a ser obrigatório após o incidente de março na borda
-2025-11-20 — Proibida a tag :latest
+- 2026-07-29 — automountServiceAccountToken: false passa de recomendado a obrigatório
+- 2026-05-14 — Adicionado o bloco de vocabulário a pedido do onboarding
+- 2026-03-02 — replicas >= 2 em prod passa a ser obrigatório após o incidente de março na borda
+- 2025-11-20 — Proibida a tag :latest
