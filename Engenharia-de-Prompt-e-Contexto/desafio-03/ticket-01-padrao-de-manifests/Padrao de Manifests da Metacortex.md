@@ -1,11 +1,17 @@
-Padrão de Manifests da Metacortex
+# Padrão de Manifests da Metacortex
+
 Página do wiki interno de Plataforma. Mantida por Segurança & Compliance.
 Última revisão: 2026-07-29. Aplica-se a todo manifesto que sobe para qualquer cluster do parque, em qualquer ambiente.
 Todo manifesto que entra num cluster do parque passa por revisão. Esta página existe para que a revisão seja sobre o que importa e não sobre o que já está decidido há dois anos. Cada regra abaixo nasceu de um incidente, de uma auditoria ou de uma discussão que ninguém quer ter de novo.
 A linguagem é a de sempre: obrigatório significa que a revisão barra sem discussão; recomendado significa que a exceção precisa estar escrita no PR; proibido significa que existe um caso registrado de estrago.
+
+---
+
 Bloco 1 — Identidade e nomenclatura
 1.1 Nome de recurso em kebab-case (obrigatório)
 Nome de objeto é minúsculo, com palavras separadas por hífen, sem camelCase, sem underscore, sem ponto. A API aceita menos do que as pessoas imaginam, e nome fora do padrão quebra ferramenta de listagem e seletor escrito à mão.
+
+```
 # errado
 metadata:
   name: NyxAPI
@@ -13,6 +19,9 @@ metadata:
 # certo
 metadata:
   name: nyx-api
+```
+
+
 1.2 Namespace no formato <cliente>-<ambiente> (obrigatório)
 Um cliente nunca compartilha namespace com outro, e ambiente nunca compartilha namespace com ambiente. Os ambientes válidos são dev, stg e prod. Exemplos: nyx-prod, orion-stg, helio-dev.
 Namespace fora desse formato não é criado pelo Construct e o manifesto não tem onde aterrissar.
