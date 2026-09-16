@@ -1,0 +1,89 @@
+Questão 08 - Postmortem técnico de incidente em produção
+
+Prompt: Produza um Postmortem técnico do incidente que está em andamento durante pico de tráfego (Task), os artefatos disponíveis para análise estão logo abaixo (action). O documento produzido precisa atender um SLA de 20 minutos e deve definir o que deve ser feito entre rollback do deploy v2.48.0 (que subiu ontem) ou scaling emergencial (aumento de limits do RDS e do pool de conexões) (Goal).
+
+O Chronos é o API gateway e a plataforma core, ponto de entrada de todo tráfego da empresa. Por trás dele, o Ledger é um data warehouse em PostgreSQL que guarda histórico de transações e eventos, enquanto o Reactor toca o processamento assíncrono por filas de mensagens. Em paralelo a tudo isso, o Beacon mantém a observabilidade do ambiente inteiro, métricas, logs e alertas, e é por ele que o plantão enxerga o que está acontecendo. Fora do core principal, o Lift é um produto em beta que o time vem amadurecendo à parte.
+
+
+Evento do deploy anterior (ontem, 18:42 UTC):
+
+Deploy chronos-api: v2.47.0 -> v2.48.0
+Argo CD sync: 2026-04-23 18:42:11 UTC
+Changelog:
+- Adicionado endpoint POST /v2/transactions/batch
+- Refatorado cliente do Ledger (pool de conexoes movido para nova biblioteca interna)
+- Bump de psycopg 3.1.18 -> 3.2.0
+- Reduzido timeout do Ledger de 5s para 2s
+
+
+Métricas do Beacon nos últimos 30 minutos:
+
+timestamp                p99_latency_ms   req_rate_s   err_rate_pct
+2026-04-24 13:30 UTC     420              1200         0.2
+2026-04-24 13:45 UTC     510              1450         0.3
+2026-04-24 14:00 UTC     780              1780         0.8
+2026-04-24 14:10 UTC     2400             2100         4.5
+2026-04-24 14:15 UTC     5200             2400         8.2
+2026-04-24 14:20 UTC     8100             2650         11.7
+
+
+Trecho do log do pod chronos-api-79c4d8b9-xk2jp:
+
+2026-04-24 14:19:48 [ERROR] [ledger-client] connection pool exhausted (max=20, active=20, waiting=147)
+2026-04-24 14:19:49 [WARN]  [ledger-client] query timeout after 2000ms: SELECT ... FROM transactions WHERE ...
+2026-04-24 14:19:49 [ERROR] [handler] POST /v2/transactions/batch failed: context deadline exceeded
+2026-04-24 14:19:50 [ERROR] [ledger-client] connection reset by peer
+2026-04-24 14:19:51 [WARN]  [circuit-breaker] ledger-client OPEN (threshold 50%, current 87%)
+2026-04-24 14:19:52 [ERROR] [reactor] failed to publish message: chronos-api upstream error
+
+
+Estado do Reactor (fila chronos-transactions):
+
+50.127 mensagens acumuladas, crescendo a ~800/min.
+Consumer lag atual: 18 minutos e aumentando.
+
+
+Estado do cluster:
+
+Chronos: 12/12 pods running (HPA no máximo).
+CPU médio dos pods: 62%.
+Memória média dos pods: 71%.
+Conexões ativas ao Ledger: 240/250 (limite do RDS).
+
+
+
+Modelo: Claude Sonnet 4.6 porque é excelente para análise e diagnóstico de incidentes técnicos.
+
+
+
+Output: O postmortem está pronto. Aqui está o resumo da análise e da decisão:
+
+Decisão: Rollback para v2.47.0 — imediatamente
+O scaling emergencial foi descartado pelos seguintes motivos:
+Não resolve a causa raiz. O timeout de 2s continua no código — com mais conexões disponíveis, o RDS apenas aguenta um pouco mais antes de repetir o colapso.
+Risco de ampliar o blast radius. Aumentar o pool de conexões no Chronos sem provisionar o RDS de forma coordenada pode esgotar os 250 max_connections do banco, derrubando todos os serviços que dependem do Ledger — não só o Chronos.
+Scaling do RDS não cabe no SLA. Upgrade de instância RDS leva 10–30 min de indisponibilidade dependendo do tipo — inviável dentro da janela de 20 min.
+
+Causa raiz identificada
+Duas mudanças do v2.48.0 criaram a condição de falha em combinação:
+
+Timeout do Ledger: 5s → 2s — sob carga, queries legítimas acima de 2s expiram, as conexões não voltam ao pool a tempo, e o pool se esgota (20 ativas, 147 em fila nos logs).
+Nova biblioteca de pool — comportamento sob carga alta não foi validado; possível regressão na devolução de conexões.
+
+O Circuit Breaker abriu com 87% de erros (threshold: 50%), o que bloqueou o Reactor e gerou acúmulo de 50k mensagens na fila.
+
+Plano resumido (20 min)
+JanelaAçãoT+0–2Rollback ArgoCD v2.48.0 → v2.47.0T+2–5Aguardar 12/12 pods em RunningT+5–8Validar Beacon: err < 1%, P99 < 800msT+8–12Confirmar Circuit Breaker CLOSEDT+12–16Iniciar drenagem da fila do ReactorT+16–20Confirmar estabilização, comunicar stakeholders
+O documento inclui tabelas completas de causa raiz, timeline, análise comparativa das opções, critérios de abort e ações pós-estabilização priorizadas.
+
+(Documento em anexo)
+
+
+Justificativa: Utilizei o TAG porque é preciso atender um SLA (20 minutos) e existe um objetivo mensurável de atingir (decidir entre rollback do deploy e o scaling emergencial). Não utilizei o RTF por conta da comparação que precisa ser feita para decisão entre rollback ou scaling, apesar de ter um ganho definindo o nível de expertise na Role. Também não utilizei RISE porque não temos uma decisão de qual é a melhor opção entre rollback e scaling para os Steps e Expectation, apesar de ser excelente para casos de diagnósticos e runbooks. 
+
+
+
+
+
+
+

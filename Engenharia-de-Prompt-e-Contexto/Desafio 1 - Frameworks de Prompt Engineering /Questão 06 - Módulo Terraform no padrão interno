@@ -1,0 +1,158 @@
+Questão 06 - Módulo Terraform no padrão interno
+
+Prompt: Foi publicado o padrão interno de IaC que todo módulo Terraform novo precisa seguir (Tags obrigatórias em todo recurso: Owner, CostCenter, Environment.
+Prefixo hvt- nos nomes de recursos. Todo bucket S3 com: encryption habilitada (SSE-S3 mínimo), versioning ativo, block public access total, logging configurado.
+Variáveis de entrada em variables.tf com description e type obrigatórios) (Context). Produza o módulo Terraform S3 (Action) aderente ao padrão (result) que está no exemplo abaixo do módulo de VPC já existente (Example):
+
+variable "environment" {
+  description = "Nome do ambiente (dev, staging, production)"
+  type        = string
+}
+
+locals {
+  common_tags = {
+    Owner       = var.owner
+    CostCenter  = var.cost_center
+    Environment = var.environment
+  }
+}
+
+resource "aws_vpc" "this" {
+  cidr_block = var.cidr_block
+  tags = merge(local.common_tags, {
+    Name = "hvt-vpc-${var.environment}"
+  })
+}
+
+
+
+Modelo: Claude Sonnet 4.6 porque entendo ser um dos melhores para codificação.
+
+
+
+Output: Aqui está o módulo Terraform S3 completo, seguindo fielmente o padrão do módulo de VPC fornecido:
+
+variables.tf
+hclvariable "environment" {
+  description = "Nome do ambiente (dev, staging, production)"
+  type        = string
+}
+
+variable "owner" {
+  description = "Time ou pessoa responsável pelo recurso"
+  type        = string
+}
+
+variable "cost_center" {
+  description = "Centro de custo para fins de billing"
+  type        = string
+}
+
+variable "bucket_purpose" {
+  description = "Finalidade do bucket, usada como sufixo no nome (ex: logs, assets, backup)"
+  type        = string
+}
+
+variable "logging_target_bucket" {
+  description = "Nome do bucket S3 de destino para os logs de acesso"
+  type        = string
+}
+
+variable "logging_target_prefix" {
+  description = "Prefixo dos objetos de log gravados no bucket de destino"
+  type        = string
+  default     = "s3-access-logs/"
+}
+
+locals.tf
+hcllocals {
+  common_tags = {
+    Owner       = var.owner
+    CostCenter  = var.cost_center
+    Environment = var.environment
+  }
+
+  bucket_name = "hvt-s3-${var.bucket_purpose}-${var.environment}"
+}
+
+main.tf
+hclresource "aws_s3_bucket" "this" {
+  bucket = local.bucket_name
+
+  tags = merge(local.common_tags, {
+    Name = local.bucket_name
+  })
+}
+
+# Encryption — SSE-S3 mínimo obrigatório pelo padrão
+resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
+  bucket = aws_s3_bucket.this.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+# Versioning
+resource "aws_s3_bucket_versioning" "this" {
+  bucket = aws_s3_bucket.this.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# Block Public Access — total, conforme padrão
+resource "aws_s3_bucket_public_access_block" "this" {
+  bucket = aws_s3_bucket.this.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Logging
+resource "aws_s3_bucket_logging" "this" {
+  bucket        = aws_s3_bucket.this.id
+  target_bucket = var.logging_target_bucket
+  target_prefix = var.logging_target_prefix
+}
+
+outputs.tf
+hcloutput "bucket_id" {
+  description = "ID (nome) do bucket S3 criado"
+  value       = aws_s3_bucket.this.id
+}
+
+output "bucket_arn" {
+  description = "ARN do bucket S3 criado"
+  value       = aws_s3_bucket.this.arn
+}
+
+Exemplo de chamada do módulo:
+hclmodule "s3_backup" {
+  source = "./modules/s3"
+
+  environment    = "production"
+  owner          = "core-reliability"
+  cost_center    = "plat-eng-001"
+  bucket_purpose = "backup"
+
+  logging_target_bucket = "hvt-s3-logs-production"
+  logging_target_prefix = "backup-access-logs/"
+}
+
+Alguns pontos de decisão que valem atenção:
+bucket_key_enabled = true no encryption — reduz custos de requisições ao KMS caso você queira migrar para SSE-KMS no futuro; não tem custo no SSE-S3.
+Logging separado em recurso próprio (aws_s3_bucket_logging) — o argumento inline dentro de aws_s3_bucket foi depreciado na AWS provider v4+. O bucket de destino dos logs precisa existir antes (crie com outro módulo ou como dependência explícita).
+bucket_key_enabled e o target_bucket de logging não recebem as common_tags porque são recursos de configuração, não recursos com identidade própria na AWS — só o aws_s3_bucket em si é taggeável.
+Se quiser, posso adicionar suporte opcional a SSE-KMS via variável, ou uma política de lifecycle como extensão do módulo.
+
+
+
+Justificativa: Context passando o padrão novo, Action pedindo a produção do módulo, Result com a aderência ao padrão e o Example com o modulo de VPC.
+
