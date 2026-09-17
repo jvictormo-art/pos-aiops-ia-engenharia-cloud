@@ -1,6 +1,6 @@
 ---
 name: metacortex-manifest
-description: Escreve ou confere manifests de Kubernetes para workloads da Metacortex seguindo o padrão interno de identidade, resiliência e segurança. Use ao pedir para gerar, escrever, revisar ou validar um manifest de workload da Metacortex.
+description: Escreve, confere ou valida manifests de Kubernetes antes de aplicar no cluster, seguindo o padrão interno da Metacortex de identidade, resiliência e segurança. Use ao pedir para gerar, escrever, revisar ou validar um manifest — o trabalho acontece no YAML, não no cluster.
 ---
 
 # metacortex-manifest
