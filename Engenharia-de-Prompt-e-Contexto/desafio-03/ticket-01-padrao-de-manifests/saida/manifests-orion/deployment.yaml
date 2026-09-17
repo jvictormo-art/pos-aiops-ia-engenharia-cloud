@@ -1,0 +1,163 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orion-fakeshop
+  namespace: orion-prod
+  labels:
+    app.kubernetes.io/name: fake-shop
+    app.kubernetes.io/instance: orion-prod
+    app.kubernetes.io/part-of: orion
+    app.kubernetes.io/managed-by: platform
+  annotations:
+    metacortex.io/owner: "platform"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fake-shop
+      app.kubernetes.io/instance: orion-prod
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fake-shop
+        app.kubernetes.io/instance: orion-prod
+        app.kubernetes.io/part-of: orion
+        app.kubernetes.io/managed-by: platform
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: orion-fakeshop
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      # Migração separada em initContainer para permitir readOnlyRootFilesystem no container principal.
+      # O entrypoint.sh original faz "flask db upgrade && gunicorn" — separamos os dois papéis.
+      initContainers:
+        - name: migrate
+          image: registry.metacortex.io/orion/fake-shop:1.0.0
+          command: ["python", "-m", "flask", "db", "upgrade"]
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: orion-fakeshop-config
+                  key: DB_HOST
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: orion-fakeshop-config
+                  key: DB_NAME
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: orion-fakeshop-config
+                  key: DB_PORT
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: orion-fakeshop-db
+                  key: db-user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: orion-fakeshop-db
+                  key: db-password
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: fake-shop
+          image: registry.metacortex.io/orion/fake-shop:1.0.0
+          # Override do entrypoint.sh: só o gunicorn; a migração já rodou no initContainer.
+          command: ["python", "-m", "gunicorn", "--bind", "0.0.0.0:5000", "index:app"]
+          ports:
+            - containerPort: 5000
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: orion-fakeshop-config
+                  key: DB_HOST
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: orion-fakeshop-config
+                  key: DB_NAME
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: orion-fakeshop-config
+                  key: DB_PORT
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: orion-fakeshop-db
+                  key: db-user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: orion-fakeshop-db
+                  key: db-password
+            # prometheus_flask_exporter.multiprocess exige um diretório gravável para métricas por worker.
+            - name: PROMETHEUS_MULTIPROC_DIR
+              value: /tmp/prometheus
+          # fake-shop não expõe /health nem /ready.
+          # readinessProbe: httpGet em /metrics — único endpoint HTTP que confirma que o gunicorn está servindo.
+          # livenessProbe: tcpSocket — não depende de rota HTTP; evita reinício em cascata por lentidão de BD.
+          # Recomendação: orion deve adicionar /health e /ready dedicados para substituir esta decisão.
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

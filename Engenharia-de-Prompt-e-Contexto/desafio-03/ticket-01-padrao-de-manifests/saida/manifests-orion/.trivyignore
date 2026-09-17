@@ -1,0 +1,6 @@
+# KSV-0125: Trivy flags registry.metacortex.io as "untrusted" because it doesn't know our internal registry.
+# The Metacortex standard (rule 3.7) REQUIRES images from registry.metacortex.io — this is correct behavior.
+KSV-0125
+
+# KSV-01010: Trivy flags DB_PORT in ConfigMap as "sensitive content". DB_PORT (5432) is not sensitive.
+KSV-01010
