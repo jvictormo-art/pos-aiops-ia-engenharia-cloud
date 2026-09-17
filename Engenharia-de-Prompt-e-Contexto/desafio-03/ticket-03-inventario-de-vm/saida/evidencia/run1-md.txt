@@ -1,0 +1,27 @@
+# Inventário — ea421a36792e (localhost)
+Coletado em 2026-09-17 22:13:58 UTC · baseline v1
+
+## Desvios
+
+| Severidade | Regra | Esperado | Encontrado |
+|---|---|---|---|
+| crítico | swap.habilitado | False | true (1024M) |
+| crítico | chaves_ssh.emitidas_por | todas emitidas por metacortex-platform | 1 chave(s) não reconhecida(s): ['madrugada@laptop-do-dozer'] |
+| alto | servicos.ativos | containerd ativo | ausente |
+| alto | servicos.ativos | node_exporter ativo | ausente |
+| alto | servicos.ativos | chrony ativo | ausente |
+| médio | ntp.sincronizado | True | False |
+
+## Não verificado
+
+| Regra | Motivo |
+|---|---|
+| ssh.login_de_root | exige privilegio que o usuario da coleta nao tem |
+
+## Conforme
+
+so.distribuicao · so.versao_minima · kernel.versao_minima · servicos.ativos · servicos.proibidos · servicos.proibidos · portas_em_escuta.publicas_permitidas · portas_em_escuta.somente_rede_interna
+
+---
+**Resumo**: 8 conforme · 6 desvio · 1 não verificado
+**Por severidade**: 3 alto · 2 crítico · 1 médio

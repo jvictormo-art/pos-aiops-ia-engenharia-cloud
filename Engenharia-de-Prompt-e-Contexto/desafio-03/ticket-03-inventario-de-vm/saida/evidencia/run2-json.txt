@@ -1,0 +1,258 @@
+{
+  "host": {
+    "endereco": "localhost",
+    "hostname": "ea421a36792e",
+    "coletado_em": "2026-09-17T22:14:06Z"
+  },
+  "inventario": {
+    "so": {
+      "distribuicao": "ubuntu",
+      "versao": "22.04"
+    },
+    "kernel": {
+      "versao": "6.12.76-linuxkit"
+    },
+    "servicos": [
+      {
+        "nome": "dbus.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "networkd-dispatcher.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "ssh.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-binfmt.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-journal-flush.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-journald.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-resolved.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-sysctl.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-sysusers.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-timedated.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-tmpfiles-setup-dev.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-tmpfiles-setup.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-update-utmp.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-user-sessions.service",
+        "tipo": "service",
+        "estado": "active"
+      },
+      {
+        "nome": "dbus.socket",
+        "tipo": "socket",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-initctl.socket",
+        "tipo": "socket",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-journald-audit.socket",
+        "tipo": "socket",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-journald-dev-log.socket",
+        "tipo": "socket",
+        "estado": "active"
+      },
+      {
+        "nome": "systemd-journald.socket",
+        "tipo": "socket",
+        "estado": "active"
+      }
+    ],
+    "swap": {
+      "habilitado": true,
+      "tamanho": "1024M"
+    },
+    "portas_em_escuta": [
+      {
+        "porta": 22,
+        "bind": "0.0.0.0",
+        "processo": null
+      },
+      {
+        "porta": 53,
+        "bind": "127.0.0.53%lo",
+        "processo": null
+      },
+      {
+        "porta": 22,
+        "bind": "::",
+        "processo": null
+      }
+    ],
+    "chaves_ssh": [
+      {
+        "identificacao": "auditor@metacortex-platform"
+      },
+      {
+        "identificacao": "madrugada@laptop-do-dozer"
+      }
+    ],
+    "ssh": {
+      "login_de_root": null
+    },
+    "ntp": {
+      "sincronizado": false,
+      "mecanismo": null
+    }
+  },
+  "conformidade": [
+    {
+      "regra": "so.distribuicao",
+      "esperado": "ubuntu",
+      "encontrado": "ubuntu",
+      "veredito": "conforme"
+    },
+    {
+      "regra": "so.versao_minima",
+      "esperado": "22.04",
+      "encontrado": "22.04",
+      "veredito": "conforme"
+    },
+    {
+      "regra": "kernel.versao_minima",
+      "esperado": "6.5",
+      "encontrado": "6.12.76-linuxkit",
+      "veredito": "conforme"
+    },
+    {
+      "regra": "servicos.ativos",
+      "esperado": "ssh ativo",
+      "encontrado": "presente",
+      "veredito": "conforme"
+    },
+    {
+      "regra": "servicos.ativos",
+      "esperado": "containerd ativo",
+      "encontrado": "ausente",
+      "veredito": "desvio",
+      "severidade": "alto"
+    },
+    {
+      "regra": "servicos.ativos",
+      "esperado": "node_exporter ativo",
+      "encontrado": "ausente",
+      "veredito": "desvio",
+      "severidade": "alto"
+    },
+    {
+      "regra": "servicos.ativos",
+      "esperado": "chrony ativo",
+      "encontrado": "ausente",
+      "veredito": "desvio",
+      "severidade": "alto"
+    },
+    {
+      "regra": "servicos.proibidos",
+      "esperado": "telnet.socket inativo",
+      "encontrado": "ausente",
+      "veredito": "conforme"
+    },
+    {
+      "regra": "servicos.proibidos",
+      "esperado": "rpcbind.socket inativo",
+      "encontrado": "ausente",
+      "veredito": "conforme"
+    },
+    {
+      "regra": "swap.habilitado",
+      "esperado": false,
+      "encontrado": "true (1024M)",
+      "veredito": "desvio",
+      "severidade": "critico"
+    },
+    {
+      "regra": "portas_em_escuta.publicas_permitidas",
+      "esperado": "apenas [22] públicas",
+      "encontrado": "nenhuma porta não autorizada em endereço público",
+      "veredito": "conforme"
+    },
+    {
+      "regra": "portas_em_escuta.somente_rede_interna",
+      "esperado": "9100 somente rede interna",
+      "encontrado": "9100 não encontrada em escuta",
+      "veredito": "conforme"
+    },
+    {
+      "regra": "chaves_ssh.emitidas_por",
+      "esperado": "todas emitidas por metacortex-platform",
+      "encontrado": "1 chave(s) não reconhecida(s): ['madrugada@laptop-do-dozer']",
+      "veredito": "desvio",
+      "severidade": "critico"
+    },
+    {
+      "regra": "ssh.login_de_root",
+      "esperado": false,
+      "encontrado": null,
+      "veredito": "nao_verificado",
+      "motivo": "exige privilegio que o usuario da coleta nao tem"
+    },
+    {
+      "regra": "ntp.sincronizado",
+      "esperado": true,
+      "encontrado": false,
+      "veredito": "desvio",
+      "severidade": "medio"
+    }
+  ],
+  "resumo": {
+    "conforme": 8,
+    "desvio": 6,
+    "nao_verificado": 1,
+    "por_severidade": {
+      "alto": 3,
+      "critico": 2,
+      "medio": 1
+    }
+  }
+}

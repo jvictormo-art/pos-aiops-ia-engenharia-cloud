@@ -1,0 +1,70 @@
+# VM de teste para metacortex-inventario
+# Ubuntu 22.04 com systemd, SSH e desvios deliberados do baseline.
+#
+# Build:  docker build -f Dockerfile.test-vm -t metacortex-test-vm .
+# Run:    docker run -d --privileged --tmpfs /run --tmpfs /run/lock \
+#           -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+#           -p 2222:22 --name test-vm metacortex-test-vm
+#
+# Desvios incluídos propositalmente:
+#   1. chave SSH com identificação fora do padrão (não contém "metacortex-platform")
+#   2. containerd, node_exporter NÃO instalados → servicos.ativos desvio
+#   3. node_exporter NÃO rodando na porta 9100 → somente_rede_interna conforme (não exposta)
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV container=docker
+
+RUN apt-get update && apt-get install -y \
+    systemd \
+    systemd-sysv \
+    dbus \
+    openssh-server \
+    chrony \
+    iproute2 \
+    procps \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Remover units que não fazem sentido em container e impedem o boot
+RUN for unit in \
+    systemd-logind.service \
+    systemd-machine-id-commit.service \
+    apt-daily.service \
+    apt-daily-upgrade.service \
+    apt-daily.timer \
+    apt-daily-upgrade.timer \
+    systemd-remount-fs.service \
+    getty.target \
+    console-getty.service; do \
+    systemctl mask "$unit" 2>/dev/null || true; \
+  done
+
+# Configurar SSH
+RUN mkdir -p /var/run/sshd && ssh-keygen -A && \
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config && \
+    sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config && \
+    systemctl enable ssh chrony
+
+# Criar usuário auditor
+RUN useradd -m -s /bin/bash auditor && \
+    mkdir -p /home/auditor/.ssh && \
+    chmod 700 /home/auditor/.ssh && \
+    chown auditor:auditor /home/auditor/.ssh
+
+# DESVIO DELIBERADO: chave com identificação fora do padrão
+# A chave real é inserida em tempo de build via ARG
+ARG AUDIT_PUBKEY
+RUN if [ -n "$AUDIT_PUBKEY" ]; then \
+      echo "$AUDIT_PUBKEY" > /home/auditor/.ssh/authorized_keys; \
+    else \
+      echo "ssh-ed25519 AAAA_placeholder madrugada@laptop-do-dozer" > /home/auditor/.ssh/authorized_keys; \
+    fi && \
+    chmod 600 /home/auditor/.ssh/authorized_keys && \
+    chown auditor:auditor /home/auditor/.ssh/authorized_keys
+
+STOPSIGNAL SIGRTMIN+3
+EXPOSE 22
+
+CMD ["/lib/systemd/systemd"]
