@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nyx-kubenews
+  namespace: nyx-dev
+  labels:
+    app.kubernetes.io/name: kube-news
+    app.kubernetes.io/instance: nyx-dev
+    app.kubernetes.io/part-of: nyx
+    app.kubernetes.io/managed-by: platform
+  annotations:
+    metacortex.io/owner: "platform"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kube-news
+      app.kubernetes.io/instance: nyx-dev
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kube-news
+        app.kubernetes.io/instance: nyx-dev
+        app.kubernetes.io/part-of: nyx
+        app.kubernetes.io/managed-by: platform
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: nyx-kubenews
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # Sem initContainer: o app chama models.initDatabase() (sequelize sync)
+      # no próprio boot do server.js — não há passo de migração separado a isolar.
+      containers:
+        - name: kube-news
+          image: fabricioveronez/kube-news:v1.0.0
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef: {name: nyx-kubenews-config, key: DB_HOST}
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef: {name: nyx-kubenews-config, key: DB_PORT}
+            - name: DB_DATABASE
+              valueFrom:
+                configMapKeyRef: {name: nyx-kubenews-config, key: DB_DATABASE}
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef: {name: nyx-kubenews-db, key: db-username}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: nyx-kubenews-db, key: db-password}
+          # /health e /ready são reais no código (system-life.js) e não dependem
+          # do banco — ao contrário do fake-shop, aqui a probe reflete o processo.
+          readinessProbe:
+            httpGet: {path: /ready, port: 8080}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /health, port: 8080}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {}

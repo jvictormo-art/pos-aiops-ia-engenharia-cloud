@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nyx-kubenews-config
+  namespace: nyx-dev
+  labels:
+    app.kubernetes.io/name: kube-news
+    app.kubernetes.io/instance: nyx-dev
+    app.kubernetes.io/part-of: nyx
+    app.kubernetes.io/managed-by: platform
+  annotations:
+    metacortex.io/owner: "platform"
+data:
+  DB_HOST: "pg.nyx-dev.svc"
+  DB_PORT: "5432"
+  DB_DATABASE: "kubedevnews"
